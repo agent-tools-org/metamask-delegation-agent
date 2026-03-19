@@ -1,0 +1,22 @@
+{
+  "name": "metamask-delegation-agent",
+  "version": "1.0.0",
+  "description": "MetaMask Delegation Agent — ERC-7710/7715 scoped permission agent for on-chain actions",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "demo": "tsx scripts/demo.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.2",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  },
+  "license": "MIT"
+}
