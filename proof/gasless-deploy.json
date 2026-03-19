@@ -1,13 +1,15 @@
 {
+  "timestamp": "2026-03-19T03:43:49.103Z",
+  "chain": {
+    "id": 1660990954,
+    "name": "Status Network Sepolia"
+  },
   "deployer": "0x3614A5bD7f206d4f9e89c6aEdC4d774e6d534D78",
-  "contractName": "DelegationRegistry",
-  "contractAddress": "0xaa88ea9e807ec630d1a274c5ce9f200aafe8a62a",
-  "deployTxHash": "0x433dc658f0b22e6a523f6400248e14be0f037a1b926cd4b8cbf75bac1f6b4e22",
-  "deployBlock": 17994891,
-  "gasUsed": 5000000,
-  "effectiveGasPrice": 0,
-  "explorerUrl": "https://sepoliascan.status.network/address/0xaa88ea9e807ec630d1a274c5ce9f200aafe8a62a",
-  "network": "Status Network Sepolia",
-  "chainId": 1660990954,
-  "timestamp": "2026-03-19T02:24:44.239Z"
+  "contract": {
+    "name": "DelegationRegistry",
+    "address": "0x7e79bac3581f0588485116152e55e9d77bf6a7a1",
+    "deployTxHash": "0xb26ac7e7c206f82ad3c5374044326aca231eb2185d8b31154efc986313122bd7",
+    "deployBlock": "17997263",
+    "gasPrice": "0"
+  }
 }
