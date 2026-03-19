@@ -124,4 +124,78 @@ describe("checkSpendingAlert", () => {
     expect(alert.percentUsed).toBeGreaterThanOrEqual(80);
     expect(alert.message).toContain("⚠️");
   });
+
+  it("shows limit-reached alert at exactly 100% usage", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(1e17),
+          maxPerDay: BigInt(1e17), // 0.1 ETH
+        },
+      ],
+    });
+
+    // Spend exactly 0.1 ETH (100% of daily limit)
+    executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(1e17),
+      data: "0x" as Hex,
+    });
+
+    const alert = checkSpendingAlert(d);
+    expect(alert.nearLimit).toBe(true);
+    expect(alert.percentUsed).toBe(100);
+    expect(alert.message).toContain("⛔");
+  });
+});
+
+describe("isDelegationValid – edge cases", () => {
+  it("returns true for delegation with no caveats", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+    });
+    expect(isDelegationValid(d)).toBe(true);
+  });
+
+  it("validates delegation with all caveat types combined", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(1e16),
+          maxPerDay: BigInt(1e17),
+        },
+        {
+          type: CaveatType.TimeBound,
+          validFrom: now - 60,
+          validUntil: now + 3600,
+        },
+        {
+          type: CaveatType.ContractTarget,
+          allowedTargets: [UNISWAP],
+        },
+        {
+          type: CaveatType.TokenAllowance,
+          token: UNISWAP,
+          allowance: BigInt(1000e6),
+        },
+      ],
+    });
+    // Should be valid (time-bound is current)
+    expect(isDelegationValid(d)).toBe(true);
+
+    // Summary should mention all caveat types
+    const s = summarisePermissions(d);
+    expect(s).toContain("ETH/tx");
+    expect(s).toContain("only interact with");
+    expect(s).toContain("valid from");
+    expect(s).toContain("allowance");
+  });
 });

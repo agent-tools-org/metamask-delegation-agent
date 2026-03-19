@@ -186,4 +186,107 @@ describe("trackSpending", () => {
     expect(r2.success).toBe(false);
     expect(r2.validation.reason).toMatch(/daily limit/);
   });
+
+  it("blocks action on an expired delegation", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.TimeBound,
+          validFrom: now - 7200,
+          validUntil: now - 3600, // expired 1 hour ago
+        },
+      ],
+    });
+    const result = executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(1000),
+      data: "0x" as Hex,
+    });
+    expect(result.success).toBe(false);
+    expect(result.validation.reason).toMatch(/expired/);
+  });
+
+  it("allows action exactly at per-tx spending limit (boundary)", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(1e16),
+          maxPerDay: BigInt(1e17),
+        },
+      ],
+    });
+    // Value exactly equals per-tx limit
+    const result = executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(1e16),
+      data: "0x" as Hex,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accumulates multiple spends up to exactly the daily limit", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(5e16),
+          maxPerDay: BigInt(1e17), // 0.1 ETH
+        },
+      ],
+    });
+
+    // Two actions of 0.05 ETH each = exactly 0.1 ETH daily limit
+    const r1 = executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(5e16),
+      data: "0x" as Hex,
+    });
+    expect(r1.success).toBe(true);
+
+    const r2 = executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(5e16),
+      data: "0x" as Hex,
+    });
+    expect(r2.success).toBe(true);
+
+    // Third action of any amount should fail
+    const r3 = executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(1),
+      data: "0x" as Hex,
+    });
+    expect(r3.success).toBe(false);
+    expect(r3.validation.reason).toMatch(/daily limit/);
+  });
+
+  it("blocks action on a delegation not yet active", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.TimeBound,
+          validFrom: now + 3600, // starts in 1 hour
+          validUntil: now + 7200,
+        },
+      ],
+    });
+    const result = executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(0),
+      data: "0x" as Hex,
+    });
+    expect(result.success).toBe(false);
+    expect(result.validation.reason).toMatch(/not yet active/);
+  });
 });

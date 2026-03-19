@@ -127,4 +127,68 @@ describe("builder", () => {
     });
     expect(d.caveats).toHaveLength(3);
   });
+
+  it("handles explicitly passed empty caveats array", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [],
+    });
+    expect(d.caveats).toHaveLength(0);
+    expect(d.delegate).toBe(DELEGATE);
+    expect(d.authority).toBe(AUTHORITY);
+  });
+
+  it("allows duplicate caveat types in the same delegation", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(1e16),
+          maxPerDay: BigInt(1e17),
+        },
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(2e16),
+          maxPerDay: BigInt(2e17),
+        },
+      ],
+    });
+    expect(d.caveats).toHaveLength(2);
+    expect(d.caveats[0].enforcer).toBe(d.caveats[1].enforcer);
+    // Terms should differ because amounts differ
+    expect(d.caveats[0].terms).not.toBe(d.caveats[1].terms);
+  });
+
+  it("builds a delegation with zero-address delegate", () => {
+    const zeroAddr = "0x0000000000000000000000000000000000000000" as Address;
+    const d = buildDelegation({
+      delegate: zeroAddr,
+      authority: AUTHORITY,
+    });
+    expect(d.delegate).toBe(zeroAddr);
+    expect(d.caveats).toHaveLength(0);
+  });
+
+  it("handles max uint256 amounts in spending limit", () => {
+    const maxUint256 = BigInt("115792089237316195423570985008687907853269984665640564039457584007913129639935");
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: maxUint256,
+          maxPerDay: maxUint256,
+        },
+      ],
+    });
+    expect(d.caveats).toHaveLength(1);
+    expect(d.caveats[0].terms).toMatch(/^0x/);
+    // Verify round-trip: encoded terms should be decodable
+    const typed = encodeDelegation(d);
+    expect(typed.message.caveats[0].terms).toBe(d.caveats[0].terms);
+  });
 });
