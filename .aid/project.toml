@@ -1,0 +1,15 @@
+[project]
+name = "synthesis-batch3"
+profile = "standard"
+
+[verify]
+command = "npm test"
+
+[rules]
+always = [
+  "All files < 300 lines",
+  "No any types at module boundaries",
+  "All tests must be fast and offline - mock all HTTP calls",
+  "Use vitest for testing",
+  "TypeScript strict mode",
+]
