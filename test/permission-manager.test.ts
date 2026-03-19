@@ -150,6 +150,37 @@ describe("checkSpendingAlert", () => {
     expect(alert.percentUsed).toBe(100);
     expect(alert.message).toContain("⛔");
   });
+
+  it("uses the most restrictive daily limit when multiple SpendingLimit caveats exist", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(1e17),
+          maxPerDay: BigInt(1e17), // 0.1 ETH
+        },
+        {
+          type: CaveatType.SpendingLimit,
+          maxPerTransaction: BigInt(1e17),
+          maxPerDay: BigInt(5e16), // 0.05 ETH (more restrictive)
+        },
+      ],
+    });
+
+    // Spend 0.04 ETH => should be 80% of 0.05 ETH (near-limit),
+    // but only 40% of 0.1 ETH (not near-limit). We expect near-limit.
+    executeWithinDelegation(d, {
+      to: DELEGATE,
+      value: BigInt(4e16),
+      data: "0x" as Hex,
+    });
+
+    const alert = checkSpendingAlert(d);
+    expect(alert.nearLimit).toBe(true);
+    expect(alert.percentUsed).toBe(80);
+  });
 });
 
 describe("isDelegationValid – edge cases", () => {

@@ -1,4 +1,4 @@
-import { decodeAbiParameters, type Address } from "viem";
+import { decodeAbiParameters, type Address, type Hex } from "viem";
 import {
   type Delegation,
   type AgentAction,
@@ -27,10 +27,23 @@ export interface SpendingRecord {
   transactions: { value: bigint; timestamp: number }[];
 }
 
+/**
+ * Production note: spending tracking should be persisted (e.g. DB/kv-store) so
+ * process restarts cannot reset safety limits.
+ *
+ * Demo scope: this is an in-memory ledger.
+ */
 const spendingLedger = new Map<string, SpendingRecord>();
 
-function ledgerKey(delegation: Delegation): string {
-  return `${delegation.delegate}-${delegation.salt}`;
+const WARN_ON_SPENDING_LEDGER_RESET =
+  process.env.SPENDING_LEDGER_WARN_ON_RESET === "true";
+
+function utcDayKey(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+function ledgerKey(delegation: Delegation, now = new Date()): string {
+  return `${delegation.salt}-${utcDayKey(now)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -125,12 +138,18 @@ export function checkPermissions(delegation: Delegation): Permission[] {
 /*  Spending tracking                                                 */
 /* ------------------------------------------------------------------ */
 
+function minOrUnset(current: bigint, candidate: bigint): bigint {
+  if (candidate === BigInt(0)) return current;
+  if (current === BigInt(0)) return candidate;
+  return candidate < current ? candidate : current;
+}
+
 /** Return the current spending record for a delegation. */
 export function trackSpending(delegation: Delegation): SpendingRecord {
   const key = ledgerKey(delegation);
   if (spendingLedger.has(key)) return spendingLedger.get(key)!;
 
-  // Initialise from the spending-limit caveat
+  // Initialise from the most restrictive spending-limit caveats
   let maxTx = BigInt(0);
   let maxDay = BigInt(0);
   for (const caveat of delegation.caveats) {
@@ -139,8 +158,8 @@ export function trackSpending(delegation: Delegation): SpendingRecord {
         [{ type: "uint256" }, { type: "uint256" }],
         caveat.terms,
       );
-      maxTx = mt;
-      maxDay = md;
+      maxTx = minOrUnset(maxTx, mt);
+      maxDay = minOrUnset(maxDay, md);
     }
   }
 
@@ -155,7 +174,14 @@ export function trackSpending(delegation: Delegation): SpendingRecord {
 }
 
 /** Reset the global spending ledger (for testing). */
-export function resetSpendingLedger(): void {
+export function resetSpendingLedger(resetWarning = false): void {
+  // Warning exists because in-memory tracking resets on process restart.
+  // Production deployments must persist spending state.
+  if (resetWarning || WARN_ON_SPENDING_LEDGER_RESET) {
+    console.warn(
+      "[metamask-delegation-agent] Spending ledger has been reset (in-memory demo). In production, persist this state to prevent restart bypass.",
+    );
+  }
   spendingLedger.clear();
 }
 
@@ -166,6 +192,39 @@ export function resetSpendingLedger(): void {
 export interface ValidationResult {
   allowed: boolean;
   reason?: string;
+}
+
+const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
+const ERC20_TRANSFER_FROM_SELECTOR = "0x23b872dd";
+
+function decodeErc20AmountFromCalldata(data: Hex): bigint | null {
+  if (data === "0x") return null;
+  if (data.length < 10) return null;
+
+  const selector = data.slice(0, 10).toLowerCase();
+  const params = (`0x${data.slice(10)}` as Hex).toLowerCase() as Hex;
+
+  try {
+    if (selector === ERC20_TRANSFER_SELECTOR) {
+      const [, amount] = decodeAbiParameters(
+        [{ type: "address" }, { type: "uint256" }],
+        params,
+      );
+      return amount;
+    }
+
+    if (selector === ERC20_TRANSFER_FROM_SELECTOR) {
+      const [, , amount] = decodeAbiParameters(
+        [{ type: "address" }, { type: "address" }, { type: "uint256" }],
+        params,
+      );
+      return amount;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function validateAction(
@@ -225,15 +284,23 @@ function validateAction(
         break;
       }
       case CaveatType.TokenAllowance: {
-        // Token allowance is enforced on-chain; we just flag large values
-        const [, allowance] = decodeAbiParameters(
+        const [token, allowance] = decodeAbiParameters(
           [{ type: "address" }, { type: "uint256" }],
           caveat.terms,
         );
-        if (action.value > allowance) {
+
+        // Only enforce token allowance for ERC-20 transfer/transferFrom actions
+        // to the token contract. Non-token actions (e.g. ETH transfer with 0x
+        // calldata) must not be blocked by this caveat.
+        if ((token as string).toLowerCase() !== action.to.toLowerCase()) break;
+
+        const tokenAmount = decodeErc20AmountFromCalldata(action.data);
+        if (tokenAmount === null) break;
+
+        if (tokenAmount > allowance) {
           return {
             allowed: false,
-            reason: `Value exceeds token allowance ${allowance}`,
+            reason: `Token transfer amount ${tokenAmount} exceeds token allowance ${allowance}`,
           };
         }
         break;

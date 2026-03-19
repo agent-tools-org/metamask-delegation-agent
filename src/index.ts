@@ -26,7 +26,8 @@ async function main() {
   }
 
   // 1. Build a delegation with spending limit + time bound + contract target
-  resetSpendingLedger();
+  const resetWarning = process.env.RESET_WARNING !== "false";
+  resetSpendingLedger(resetWarning);
   const now = Math.floor(Date.now() / 1000);
 
   const delegation = buildDelegation({

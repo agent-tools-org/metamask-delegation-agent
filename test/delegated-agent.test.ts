@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { Address, Hex } from "viem";
+import { encodeFunctionData, type Address, type Hex } from "viem";
 import { buildDelegation } from "../src/delegation/builder.js";
 import { CaveatType, type AgentAction } from "../src/delegation/types.js";
 import {
@@ -13,6 +13,7 @@ const DELEGATE: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const AUTHORITY: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const UNISWAP: Address = "0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD";
 const UNAUTHORISED: Address = "0xdead000000000000000000000000000000000000";
+const TOKEN: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // mixed-case on purpose
 
 beforeEach(() => resetSpendingLedger());
 
@@ -125,6 +126,149 @@ describe("executeWithinDelegation", () => {
     const result = executeWithinDelegation(d, action);
     expect(result.success).toBe(false);
     expect(result.validation.reason).toMatch(/not in allowed list/);
+  });
+
+  it("does not block non-token actions for TokenAllowance", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.TokenAllowance,
+          token: TOKEN,
+          allowance: BigInt(100),
+        },
+      ],
+    });
+
+    const action: AgentAction = {
+      to: TOKEN,
+      value: BigInt(1000),
+      data: "0x" as Hex,
+    };
+
+    const result = executeWithinDelegation(d, action);
+    expect(result.success).toBe(true);
+  });
+
+  it("blocks when decoded ERC20 transfer amount exceeds allowance", () => {
+    const allowance = BigInt(100);
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.TokenAllowance,
+          token: TOKEN,
+          allowance,
+        },
+      ],
+    });
+
+    const data = encodeFunctionData({
+      abi: [
+        {
+          type: "function",
+          name: "transfer",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" },
+          ],
+          outputs: [{ name: "", type: "bool" }],
+        },
+      ],
+      functionName: "transfer",
+      args: [DELEGATE, BigInt(101)],
+    });
+
+    const result = executeWithinDelegation(d, {
+      to: TOKEN,
+      value: BigInt(0),
+      data,
+    });
+    expect(result.success).toBe(false);
+    expect(result.validation.reason).toMatch(/exceeds token allowance/i);
+  });
+
+  it("allows decoded ERC20 transfer amount at boundary (amount == allowance)", () => {
+    const allowance = BigInt(100);
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.TokenAllowance,
+          token: TOKEN,
+          allowance,
+        },
+      ],
+    });
+
+    const data = encodeFunctionData({
+      abi: [
+        {
+          type: "function",
+          name: "transferFrom",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "from", type: "address" },
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" },
+          ],
+          outputs: [{ name: "", type: "bool" }],
+        },
+      ],
+      functionName: "transferFrom",
+      args: [AUTHORITY, DELEGATE, allowance],
+    });
+
+    const result = executeWithinDelegation(d, {
+      to: TOKEN,
+      value: BigInt(0),
+      data,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("matches token addresses case-insensitively", () => {
+    const d = buildDelegation({
+      delegate: DELEGATE,
+      authority: AUTHORITY,
+      caveats: [
+        {
+          type: CaveatType.TokenAllowance,
+          token: TOKEN,
+          allowance: BigInt(1),
+        },
+      ],
+    });
+
+    const data = encodeFunctionData({
+      abi: [
+        {
+          type: "function",
+          name: "transfer",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" },
+          ],
+          outputs: [{ name: "", type: "bool" }],
+        },
+      ],
+      functionName: "transfer",
+      args: [DELEGATE, BigInt(2)],
+    });
+
+    const result = executeWithinDelegation(d, {
+      to: TOKEN.toLowerCase() as Address,
+      value: BigInt(0),
+      data,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.validation.reason).toMatch(/exceeds token allowance/i);
   });
 });
 
